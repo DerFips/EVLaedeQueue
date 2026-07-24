@@ -1,4 +1,4 @@
-# Sicherheitshinweise (AP7 - Schwachstellenanalyse)
+# Sicherheitshinweise
 
 ## Wichtig fuer den Produktivstart
 Der Server MUSS mit dem Flag `--no-server-header` gestartet werden, um den
