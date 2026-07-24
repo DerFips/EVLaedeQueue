@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EVLädeQueue</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<link rel="stylesheet" href="/static/banner/JM_style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-icon">&#9889;</span>
+      <span class="brand-text">EV<span class="brand-accent">L&auml;de</span>Queue</span>
+    </div>
+    <nav id="mainNav" class="main-nav hidden">
+      <button class="nav-btn active" data-view="dashboard">Standorte</button>
+      <button class="nav-btn" data-view="my-status">Mein Status</button>
+      <button class="nav-btn admin-only hidden" data-view="admin">Verwaltung</button>
+    </nav>
+    <div class="topbar-right">
+      <span id="userBadge" class="user-badge hidden"></span>
+      <button id="logoutBtn" class="btn btn-ghost hidden">Abmelden</button>
+    </div>
+  </div>
+</header>
+
+<main class="app-main">
+
+  <!-- AUTH VIEW -->
+  <section id="view-auth" class="view">
+    <div class="auth-wrapper">
+      <div class="auth-card">
+        <div class="auth-tabs">
+          <button class="tab-btn active" data-tab="login">Anmelden</button>
+          <button class="tab-btn" data-tab="register">Registrieren</button>
+        </div>
+
+        <form id="loginForm" class="auth-form">
+          <label>E-Mail
+            <input type="email" name="email" required placeholder="du@beispiel.de">
+          </label>
+          <label>Passwort
+            <input type="password" name="password" required placeholder="********">
+          </label>
+          <button type="submit" class="btn btn-primary btn-block">Anmelden</button>
+          <p class="form-msg" id="loginMsg"></p>
+        </form>
+
+        <form id="registerForm" class="auth-form hidden">
+          <label>Name
+            <input type="text" name="full_name" required placeholder="Vor- und Nachname">
+          </label>
+          <label>E-Mail
+            <input type="email" name="email" required placeholder="du@beispiel.de">
+          </label>
+          <label>Passwort
+            <input type="password" name="password" required placeholder="Min. 10 Zeichen, Gross-/Kleinbuchstaben, Ziffer">
+          </label>
+          <button type="submit" class="btn btn-primary btn-block">Konto erstellen</button>
+          <p class="form-msg" id="registerMsg"></p>
+        </form>
+      </div>
+      <div class="auth-hero">
+        <div class="hero-badge">Community Ladepunkte</div>
+        <h1>Lade smarter.<br>Warte cleverer.</h1>
+        <p>Sieh in Echtzeit, welche Ladepunkte frei sind, reihe dich fair in die
+        Warteschlange ein und biete deinen Parkplatz an, sobald du fertig geladen hast.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- DASHBOARD VIEW -->
+  <section id="view-dashboard" class="view hidden">
+    <div class="view-header">
+      <h2>Standorte &amp; Ladepunkte</h2>
+      <button id="refreshDashboardBtn" class="btn btn-secondary">&#8635; Aktualisieren</button>
+    </div>
+    <div id="locationsContainer" class="locations-grid"></div>
+  </section>
+
+  <!-- MY STATUS VIEW -->
+  <section id="view-my-status" class="view hidden">
+    <div class="view-header">
+      <h2>Mein Status</h2>
+      <button id="refreshMyStatusBtn" class="btn btn-secondary">&#8635; Aktualisieren</button>
+    </div>
+    <div id="myStatusContainer" class="status-container"></div>
+  </section>
+
+  <!-- ADMIN VIEW -->
+  <section id="view-admin" class="view hidden">
+    <div class="view-header">
+      <h2>Standort- &amp; Ladepunktverwaltung</h2>
+    </div>
+
+    <div class="admin-grid">
+      <div class="card">
+        <h3>Neuen Standort anlegen</h3>
+        <form id="createLocationForm" class="stacked-form">
+          <label>Name
+            <input type="text" name="name" required placeholder="z. B. Parkhaus Mitte">
+          </label>
+          <label>Adresse
+            <input type="text" name="address" required placeholder="Strasse, PLZ Ort">
+          </label>
+          <label>Beschreibung (optional)
+            <textarea name="description" rows="2"></textarea>
+          </label>
+          <button type="submit" class="btn btn-primary">Standort anlegen</button>
+          <p class="form-msg" id="createLocationMsg"></p>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>Ladepunkt hinzufuegen</h3>
+        <form id="createPointForm" class="stacked-form">
+          <label>Standort
+            <select name="location_id" id="pointLocationSelect" required></select>
+          </label>
+          <label>Bezeichnung
+            <input type="text" name="label" required placeholder="z. B. LP1">
+          </label>
+          <label>Steckertyp (optional)
+            <input type="text" name="connector_type" placeholder="z. B. Typ 2">
+          </label>
+          <label>Max. Leistung (kW, optional)
+            <input type="number" name="max_power_kw" min="1" max="1000">
+          </label>
+          <button type="submit" class="btn btn-primary">Ladepunkt anlegen</button>
+          <p class="form-msg" id="createPointMsg"></p>
+        </form>
+      </div>
+    </div>
+
+    <div class="card admin-list-card">
+      <h3>Bestehende Standorte</h3>
+      <div id="adminLocationsList" class="admin-list"></div>
+    </div>
+  </section>
+
+</main>
+
+<footer id="footerAuth" class="app-footer">
+  <p>Mit &lt;3 in M&uuml;hlacker entwickelt.</p>
+
+  <div id="JM_wrapper" class="jm-banner-wrapper">
+    <div id="JM_banner">
+      <div id="JM_content">
+        <img id="JM_outline" src="/static/banner/JM_outline.svg" alt="">
+        <img id="JM_headlineMobile" src="/static/banner/JM_headlineMobile.svg" alt="Part of THE LÄND">
+        <img id="JM_headlineDesktop" src="/static/banner/JM_headline.svg" alt="Part of THE LÄND">
+        <button id="JM_cta" type="button" aria-label="MEHR ERFAHREN">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 44"><rect width="220" height="44"></rect><path id="JM_arrow" d="M192.5,16.5l5.5,5.5h-12.5m12.5,0l-5.5,5.5" vector-effect="non-scaling-stroke" fill="none" stroke="#fff" stroke-linecap="square" stroke-linejoin="round" stroke-width="1.5"></path><g><path d="M23.85,20.35h-.24v8.08h-2.61V15.83h3.74l3.16,8.93h.24l3.14-8.93h3.74v12.6h-2.61v-8.08h-.24l-2.92,8.08h-2.48l-2.92-8.08Z" fill="#fff"></path><path d="M40.78,17.97v3.04h4.79v2.14h-4.79v3.13h5.9v2.14h-8.73V15.83h7.62v2.14h-4.79Z" fill="#fff"></path><path d="M56.31,23.25h-4.73v5.18h-2.83V15.83h2.83v5.06h4.73v-5.06h2.83v12.6h-2.83v-5.18Z" fill="#fff"></path><path d="M66.01,23.62h-1.11v4.81h-2.83V15.83h5.14c2.7,0,4.83,.95,4.83,3.94,0,2.77-1.78,3.49-3,3.62v.23l3.18,4.57v.23h-3.09l-3.13-4.81Zm.91-2.09c1.26,0,2.29-.29,2.29-1.76s-1.02-1.85-2.27-1.85h-2.03v3.62h2.02Z" fill="#fff"></path><path d="M81.51,17.97v3.04h4.79v2.14h-4.79v3.13h5.9v2.14h-8.73V15.83h7.62v2.14h-4.79Z" fill="#fff"></path><path d="M93.42,23.62h-1.11v4.81h-2.83V15.83h5.14c2.7,0,4.83,.95,4.83,3.94,0,2.77-1.78,3.49-3,3.62v.23l3.18,4.57v.23h-3.09l-3.13-4.81Zm.91-2.09c1.26,0,2.29-.29,2.29-1.76s-1.02-1.85-2.27-1.85h-2.03v3.62h2.02Z" fill="#fff"></path><path d="M104.67,17.97v3.24h5.25v2.14h-5.25v5.08h-2.83V15.83h8.29v2.14h-5.46Z" fill="#fff"></path><path d="M110.89,28.2l4.03-12.37h3.7l4.01,12.37v.23h-2.85l-.78-2.54h-4.51l-.76,2.54h-2.85v-.23Zm7.58-4.39l-1.59-5.33h-.24l-1.59,5.33h3.42Z" fill="#fff"></path><path d="M132.13,23.25h-4.73v5.18h-2.83V15.83h2.83v5.06h4.73v-5.06h2.83v12.6h-2.83v-5.18Z" fill="#fff"></path><path d="M141.82,23.62h-1.11v4.81h-2.83V15.83h5.14c2.7,0,4.83,.95,4.83,3.94,0,2.77-1.78,3.49-3,3.62v.23l3.18,4.57v.23h-3.09l-3.13-4.81Zm.91-2.09c1.26,0,2.29-.29,2.29-1.76s-1.02-1.85-2.27-1.85h-2.03v3.62h2.02Z" fill="#fff"></path><path d="M153.07,17.97v3.04h4.79v2.14h-4.79v3.13h5.9v2.14h-8.73V15.83h7.62v2.14h-4.79Z" fill="#fff"></path><path d="M164,20.42h-.24v8.01h-2.72V15.83h2.98l4.79,8.01h.24V15.83h2.72v12.6h-2.96l-4.81-8.01Z" fill="#fff"></path></g></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<footer id="footerApp" class="app-footer app-footer-compact hidden">
+  <p>Mit &lt;3 in M&uuml;hlacker entwickelt.</p>
+  <a href="https://www.thelaend.de/" target="_blank" rel="noopener noreferrer" aria-label="Part of THE L&Auml;ND - www.thelaend.de">
+    <img src="/static/img/thelaend_logo.jpg" alt="Part of THE L&Auml;ND" class="footer-logo">
+  </a>
+</footer>
+
+<div id="toastContainer" class="toast-container"></div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/app.js"></script>
+<script src="/static/banner/JM_script.js"></script>
+</body>
+</html>
