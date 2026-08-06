@@ -56,8 +56,42 @@ class UserOut(BaseModel):
     role: str
     is_active: bool
     is_verified: bool
+    reward_points: int = 0
+    leaderboard_opt_in: bool = False
+    avatar_path: str | None = None
+    nickname: str | None = None
+    leaderboard_display: str = "user"
 
     model_config = {"from_attributes": True}
+
+
+class UserProfileUpdate(BaseModel):
+    full_name: str | None = None
+    nickname: str | None = None
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) < 2:
+            raise ValueError("Name muss mindestens 2 Zeichen lang sein")
+        if len(v) > 255:
+            raise ValueError("Name darf maximal 255 Zeichen lang sein")
+        return v
+
+    @field_validator("nickname")
+    @classmethod
+    def validate_nickname(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) == 0:
+            return None
+        if len(v) > 100:
+            raise ValueError("Spitzname darf maximal 100 Zeichen lang sein")
+        return v
 
 
 class TokenPair(BaseModel):

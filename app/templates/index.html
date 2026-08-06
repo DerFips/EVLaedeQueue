@@ -9,6 +9,7 @@
 </head>
 <body>
 
+
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand">
@@ -18,6 +19,8 @@
     <nav id="mainNav" class="main-nav hidden">
       <button class="nav-btn active" data-view="dashboard">Standorte</button>
       <button class="nav-btn" data-view="my-status">Mein Status</button>
+      <button class="nav-btn" data-view="leaderboard">Leaderboard</button>
+      <button class="nav-btn" data-view="profile">Profil</button>
       <button class="nav-btn admin-only hidden" data-view="admin">Verwaltung</button>
     </nav>
     <div class="topbar-right">
@@ -27,7 +30,9 @@
   </div>
 </header>
 
+
 <main class="app-main">
+
 
   <!-- AUTH VIEW -->
   <section id="view-auth" class="view">
@@ -37,6 +42,7 @@
           <button class="tab-btn active" data-tab="login">Anmelden</button>
           <button class="tab-btn" data-tab="register">Registrieren</button>
         </div>
+
 
         <form id="loginForm" class="auth-form">
           <label>E-Mail
@@ -48,6 +54,7 @@
           <button type="submit" class="btn btn-primary btn-block">Anmelden</button>
           <p class="form-msg" id="loginMsg"></p>
         </form>
+
 
         <form id="registerForm" class="auth-form hidden">
           <label>Name
@@ -72,6 +79,7 @@
     </div>
   </section>
 
+
   <!-- DASHBOARD VIEW -->
   <section id="view-dashboard" class="view hidden">
     <div class="view-header">
@@ -80,6 +88,7 @@
     </div>
     <div id="locationsContainer" class="locations-grid"></div>
   </section>
+
 
   <!-- MY STATUS VIEW -->
   <section id="view-my-status" class="view hidden">
@@ -90,11 +99,105 @@
     <div id="myStatusContainer" class="status-container"></div>
   </section>
 
+
+  <!-- LEADERBOARD VIEW -->
+  <section id="view-leaderboard" class="view hidden">
+    <div class="view-header">
+      <h2>Leaderboard</h2>
+      <button id="refreshLeaderboardBtn" class="btn btn-secondary">&#8635; Aktualisieren</button>
+    </div>
+    <p class="view-hint">Punkte gibt es, wenn jemand deinen freigegebenen Parkplatz tatsaechlich nutzt. Nur Mitglieder mit aktiviertem Opt-In (siehe Profil) erscheinen hier.</p>
+    <div id="leaderboardContainer" class="leaderboard-container"></div>
+  </section>
+
+
+  <!-- PROFILE VIEW -->
+  <section id="view-profile" class="view hidden">
+    <div class="view-header">
+      <h2>Mein Profil</h2>
+    </div>
+
+    <div class="admin-grid">
+      <div class="card">
+        <h3>Name &amp; Spitzname</h3>
+        <form id="profileForm" class="stacked-form">
+          <label>Name
+            <input type="text" name="full_name" id="profileFullNameInput" required>
+          </label>
+          <label>Spitzname (optional)
+            <input type="text" name="nickname" id="profileNicknameInput" placeholder="Wird bevorzugt angezeigt, falls gesetzt">
+          </label>
+          <button type="submit" class="btn btn-primary">Speichern</button>
+          <p class="form-msg" id="profileFormMsg"></p>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>Profilbild</h3>
+        <div class="profile-avatar-row">
+          <img id="profileAvatarPreview" class="profile-avatar-preview" src="/static/img/avatar-placeholder.png" alt="Profilbild">
+          <div>
+            <label class="btn btn-secondary file-upload-btn">
+              Bild auswaehlen
+              <input type="file" id="avatarFileInput" accept="image/png,image/jpeg,image/webp" hidden>
+            </label>
+            <p class="hint-text">JPEG, PNG oder WebP, maximal 2&nbsp;MB. Das Bild wird automatisch zugeschnitten und verkleinert.</p>
+            <p class="form-msg" id="avatarMsg"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Punktestand &amp; Leaderboard</h3>
+        <p id="profileRewardsSummary" class="rewards-summary">Lade Punktestand...</p>
+        <label class="toggle-row">
+          <input type="checkbox" id="leaderboardOptInToggle">
+          Auf dem Leaderboard sichtbar sein
+        </label>
+        <p class="hint-text">Standardmaessig bist du nicht auf dem Leaderboard sichtbar. Aktiviere diese Option, wenn dein Name (bzw. Auto) und Punktestand oeffentlich fuer alle Mitglieder erscheinen sollen.</p>
+        <p class="form-msg" id="leaderboardOptInMsg"></p>
+
+        <div id="leaderboardDisplayChoice" class="leaderboard-display-choice">
+          <p class="hint-text" style="margin-top:16px;">Was soll auf dem Leaderboard angezeigt werden?</p>
+          <label class="radio-row">
+            <input type="radio" name="leaderboardDisplay" value="user" id="displayChoiceUser">
+            Mein Name / Spitzname
+          </label>
+          <label class="radio-row">
+            <input type="radio" name="leaderboardDisplay" value="car" id="displayChoiceCar">
+            Mein Hauptauto
+          </label>
+          <p class="form-msg" id="leaderboardDisplayMsg"></p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Meine Autos</h3>
+        <form id="createCarForm" class="stacked-form">
+          <label>Name
+            <input type="text" name="name" required placeholder="z. B. Mein Tesla">
+          </label>
+          <label>Marke (optional)
+            <input type="text" name="brand" placeholder="z. B. Tesla">
+          </label>
+          <label>Modell (optional)
+            <input type="text" name="model" placeholder="z. B. Model 3">
+          </label>
+          <button type="submit" class="btn btn-primary">Auto anlegen</button>
+          <p class="form-msg" id="createCarMsg"></p>
+        </form>
+        <div id="carsList" class="cars-list"></div>
+      </div>
+    </div>
+  </section>
+
+
   <!-- ADMIN VIEW -->
   <section id="view-admin" class="view hidden">
     <div class="view-header">
       <h2>Standort- &amp; Ladepunktverwaltung</h2>
     </div>
+
 
     <div class="admin-grid">
       <div class="card">
@@ -113,6 +216,7 @@
           <p class="form-msg" id="createLocationMsg"></p>
         </form>
       </div>
+
 
       <div class="card">
         <h3>Ladepunkt hinzufuegen</h3>
@@ -135,16 +239,20 @@
       </div>
     </div>
 
+
     <div class="card admin-list-card">
       <h3>Bestehende Standorte</h3>
       <div id="adminLocationsList" class="admin-list"></div>
     </div>
   </section>
 
+
 </main>
+
 
 <footer id="footerAuth" class="app-footer">
   <p>Mit &lt;3 in M&uuml;hlacker entwickelt.</p>
+
 
   <div id="JM_wrapper" class="jm-banner-wrapper">
     <div id="JM_banner">
@@ -160,6 +268,7 @@
   </div>
 </footer>
 
+
 <footer id="footerApp" class="app-footer app-footer-compact hidden">
   <p>Mit &lt;3 in M&uuml;hlacker entwickelt.</p>
   <a href="https://www.thelaend.de/" target="_blank" rel="noopener noreferrer" aria-label="Part of THE L&Auml;ND - www.thelaend.de">
@@ -167,7 +276,9 @@
   </a>
 </footer>
 
+
 <div id="toastContainer" class="toast-container"></div>
+
 
 <script src="/static/js/api.js"></script>
 <script src="/static/js/app.js"></script>

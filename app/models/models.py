@@ -53,8 +53,48 @@ class User(Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
+    # Belohnungssystem (AP10): Punktestand, Sichtbarkeit auf dem Leaderboard (Opt-In,
+    # standardmaessig deaktiviert) sowie optionales Profilbild.
+    reward_points: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    leaderboard_opt_in: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    avatar_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Spitzname: optional, wird auf dem Leaderboard und im Profil bevorzugt anstelle
+    # des echten Namens angezeigt, wenn gesetzt. full_name bleibt der rechtsverbindliche
+    # Name (z. B. fuer Abrechnung/Support) und ist ueber PUT /auth/me aenderbar.
+    nickname: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Legt fest, was auf dem Leaderboard als Identitaet erscheint, falls der Nutzer per
+    # leaderboard_opt_in sichtbar ist: der eigene (Spitz-)Name oder sein registriertes Auto.
+    leaderboard_display = mapped_column(
+        Enum("user", "car", name="leaderboarddisplay", values_callable=lambda x: list(x)),
+        default="user",
+        nullable=False,
+    )
+
     sessions: Mapped[list["ChargingSession"]] = relationship(back_populates="user")
-    queue_entries: Mapped[list["QueueEntry"]] = relationship(back_populates="user")
+    queue_entries: Mapped[list["QueueEntry"]] = relationship(back_populates="user", foreign_keys="[QueueEntry.user_id]")
+    point_transactions: Mapped[list["PointTransaction"]] = relationship(back_populates="user")
+    cars: Mapped[list["Car"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
+
+
+
+class Car(Base):
+    """Ein vom Nutzer angelegtes Fahrzeug (AP10-Erweiterung). Ein Nutzer kann mehrere
+    Autos anlegen, aber nur eines davon als aktives Leaderboard-Auto markieren
+    (is_primary), das dann anstelle des Nutzernamens angezeigt wird."""
+    __tablename__ = "cars"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    owner_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    brand: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    photo_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    owner: Mapped["User"] = relationship(back_populates="cars")
 
 
 class Location(Base):
@@ -124,8 +164,17 @@ class QueueEntry(Base):
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
+    # Belohnungssystem (AP10): Wer hat durch sein Abstoepseln diesen Platz freigemacht
+    # (= Empfaenger der Punkte), und wie viele Punkte sind faellig. Die Gutschrift erfolgt
+    # bewusst erst beim tatsaechlichen Check-in dieser wartenden Person (nicht bereits bei
+    # der Benachrichtigung), damit niemand Punkte fuer ein ungenutztes Angebot bekommt.
+    benefactor_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    reward_points_pending: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reward_points_awarded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     charging_point: Mapped["ChargingPoint"] = relationship(back_populates="queue_entries")
-    user: Mapped["User"] = relationship(back_populates="queue_entries")
+    user: Mapped["User"] = relationship(back_populates="queue_entries", foreign_keys=[user_id])
+    benefactor: Mapped["User | None"] = relationship(foreign_keys=[benefactor_user_id])
 
 
 class DevicePlatform(str, enum.Enum):
@@ -157,3 +206,26 @@ class RefreshToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class PointTransactionReason(str, enum.Enum):
+    PARKING_OFFER_HONORED = "parking_offer_honored"
+
+
+class PointTransaction(Base):
+    """Protokolliert jede Punktegutschrift des Belohnungssystems (AP10), um Missbrauch
+    nachvollziehbar zu machen. Die Unique-Constraint auf queue_entry_id stellt sicher,
+    dass fuer denselben Warteschlangeneintrag niemals doppelt Punkte vergeben werden
+    (z. B. bei mehrfachem Aufruf des Check-in-Endpunkts)."""
+    __tablename__ = "point_transactions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    points: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[PointTransactionReason] = mapped_column(
+        Enum(PointTransactionReason, values_callable=lambda x: [e.value for e in x]), nullable=False
+    )
+    queue_entry_id: Mapped[str] = mapped_column(String(36), ForeignKey("queue_entries.id"), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="point_transactions")

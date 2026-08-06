@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.db.session import get_db
 from app.models.models import (
     Location, ChargingPoint, ChargingSession, ChargingSessionStatus,
-    QueueEntry, QueueStatus, User,
+    QueueEntry, QueueStatus, User, PointTransaction, PointTransactionReason,
 )
 from app.schemas_charging import LocationWithStatusOut, ChargingPointStatusOut, CheckInResponse, MySessionOut
 from app.deps import get_current_user
@@ -115,11 +115,53 @@ def check_in(
         raise HTTPException(status_code=409, detail="Ladepunkt wurde gerade belegt, bitte aktualisieren")
     db.refresh(session_obj)
 
+    _award_pending_reward_if_applicable(point_id, current_user, db)
+
     return CheckInResponse(
         session_id=session_obj.id,
         charging_point_id=point_id,
         checked_in_at=session_obj.checked_in_at.isoformat(),
     )
+
+
+def _award_pending_reward_if_applicable(point_id: str, checked_in_user: User, db: Session) -> None:
+    """Schreibt Belohnungspunkte (AP10) gut, sobald die vorher benachrichtigte Person
+    tatsaechlich einen Ladevorgang startet. Die Punkte gehen an die Person, die den
+    Platz freigemacht hat (benefactor_user_id), nicht an die einchecke Person selbst."""
+    pending_entry = (
+        db.query(QueueEntry)
+        .filter(
+            QueueEntry.charging_point_id == point_id,
+            QueueEntry.user_id == checked_in_user.id,
+            QueueEntry.status == QueueStatus.NOTIFIED,
+            QueueEntry.reward_points_awarded == False,  # noqa: E712
+            QueueEntry.benefactor_user_id.isnot(None),
+        )
+        .order_by(QueueEntry.notified_at.desc())
+        .first()
+    )
+    if not pending_entry or not pending_entry.reward_points_pending:
+        return
+
+    existing_tx = db.query(PointTransaction).filter(PointTransaction.queue_entry_id == pending_entry.id).first()
+    if existing_tx:
+        return
+
+    benefactor = db.query(User).filter(User.id == pending_entry.benefactor_user_id).first()
+    if not benefactor:
+        return
+
+    tx = PointTransaction(
+        user_id=benefactor.id,
+        points=pending_entry.reward_points_pending,
+        reason=PointTransactionReason.PARKING_OFFER_HONORED,
+        queue_entry_id=pending_entry.id,
+    )
+    db.add(tx)
+    benefactor.reward_points += pending_entry.reward_points_pending
+    pending_entry.reward_points_awarded = True
+    pending_entry.status = QueueStatus.COMPLETED
+    db.commit()
 
 
 @router.get("/my-session", response_model=MySessionOut | None)

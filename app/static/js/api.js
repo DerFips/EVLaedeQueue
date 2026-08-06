@@ -102,4 +102,34 @@ const Api = {
   adminCreatePoint: (locationId, payload) => apiRequest("POST", `/admin/locations/${locationId}/charging-points`, payload),
   adminDeletePoint: (pointId) => apiRequest("DELETE", `/admin/charging-points/${pointId}`),
   adminDeleteLocation: (locationId) => apiRequest("DELETE", `/admin/locations/${locationId}`),
+
+  myRewards: () => apiRequest("GET", "/rewards/me"),
+  setLeaderboardOptIn: (optIn) => apiRequest("PUT", "/rewards/leaderboard-opt-in", { leaderboard_opt_in: optIn }),
+  setLeaderboardDisplay: (display) => apiRequest("PUT", "/rewards/leaderboard-display", { leaderboard_display: display }),
+  getLeaderboard: () => apiRequest("GET", "/rewards/leaderboard"),
+
+  updateProfile: (payload) => apiRequest("PUT", "/auth/me", payload),
+
+  listCars: () => apiRequest("GET", "/rewards/cars"),
+  createCar: (payload) => apiRequest("POST", "/rewards/cars", payload),
+  updateCar: (carId, payload) => apiRequest("PUT", `/rewards/cars/${carId}`, payload),
+  deleteCar: (carId) => apiRequest("DELETE", `/rewards/cars/${carId}`),
+
+  uploadAvatar: (file) => uploadImage("/rewards/avatar", file),
+  uploadCarPhoto: (carId, file) => uploadImage(`/rewards/cars/${carId}/photo`, file),
 };
+
+async function uploadImage(path, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const headers = {};
+  if (TokenStore.getAccess()) headers["Authorization"] = `Bearer ${TokenStore.getAccess()}`;
+  const res = await fetch(`${API_BASE}${path}`, { method: "POST", headers, body: formData });
+  let data = null;
+  try { data = await res.json(); } catch (_) { /* kein JSON-Body */ }
+  if (!res.ok) {
+    const detailMsg = data && data.detail ? data.detail : `Fehler ${res.status}`;
+    throw new ApiError(res.status, detailMsg);
+  }
+  return data;
+}

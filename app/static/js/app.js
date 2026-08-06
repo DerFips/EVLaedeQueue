@@ -23,6 +23,8 @@ function switchView(viewName) {
   if (viewName === "dashboard") loadDashboard();
   if (viewName === "my-status") loadMyStatus();
   if (viewName === "admin") loadAdminView();
+  if (viewName === "leaderboard") loadLeaderboard();
+  if (viewName === "profile") loadProfile();
 }
 
 function setLoggedInUI(user) {
@@ -491,3 +493,269 @@ if (authCardEl) bannerSyncObserver.observe(authCardEl);
 /* ---------- Init ---------- */
 tryAutoLogin();
 syncBannerWidth();
+
+
+/* ---------- Leaderboard ---------- */
+async function loadLeaderboard() {
+  const container = document.getElementById("leaderboardContainer");
+  container.innerHTML = `<p class="hint-text">Lade Leaderboard...</p>`;
+  try {
+    const entries = await Api.getLeaderboard();
+    if (!entries.length) {
+      container.innerHTML = `<p class="hint-text">Noch niemand auf dem Leaderboard sichtbar.</p>`;
+      return;
+    }
+    container.innerHTML = `
+      <table class="leaderboard-table">
+        <thead><tr><th>Rang</th><th></th><th>Name</th><th>Punkte</th></tr></thead>
+        <tbody>
+          ${entries.map(e => `
+            <tr>
+              <td>#${e.rank}</td>
+              <td><img class="leaderboard-avatar" src="${e.avatar_path || "/static/img/avatar-placeholder.png"}" alt=""></td>
+              <td>${escapeHtml(e.display_name)}${e.is_car ? ` <span class="badge-car" title="Zeigt ein Auto">&#128663;</span>` : ""}</td>
+              <td>${e.reward_points}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    `;
+  } catch (err) {
+    container.innerHTML = `<p class="form-msg error">Fehler beim Laden: ${err.detail || err.message}</p>`;
+  }
+}
+
+/* ---------- Profile ---------- */
+async function loadProfile() {
+  const preview = document.getElementById("profileAvatarPreview");
+  if (currentUser && currentUser.avatar_path) {
+    preview.src = currentUser.avatar_path;
+  }
+  document.getElementById("profileFullNameInput").value = currentUser ? currentUser.full_name : "";
+  document.getElementById("profileNicknameInput").value = currentUser ? (currentUser.nickname || "") : "";
+
+  const summary = document.getElementById("profileRewardsSummary");
+  const toggle = document.getElementById("leaderboardOptInToggle");
+  summary.textContent = "Lade Punktestand...";
+  try {
+    const rewards = await Api.myRewards();
+    toggle.checked = rewards.leaderboard_opt_in;
+    document.getElementById("displayChoiceUser").checked = rewards.leaderboard_display === "user";
+    document.getElementById("displayChoiceCar").checked = rewards.leaderboard_display === "car";
+    summary.textContent = rewards.leaderboard_opt_in && rewards.leaderboard_rank
+      ? `Du hast ${rewards.reward_points} Punkte und stehst auf Rang #${rewards.leaderboard_rank} im Leaderboard.`
+      : `Du hast ${rewards.reward_points} Punkte gesammelt.`;
+  } catch (err) {
+    summary.textContent = `Fehler beim Laden: ${err.detail || err.message}`;
+  }
+
+  loadCars();
+}
+
+document.getElementById("profileForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msgEl = document.getElementById("profileFormMsg");
+  msgEl.textContent = "";
+  msgEl.classList.remove("error", "success");
+  const fd = new FormData(e.target);
+  try {
+    const updated = await Api.updateProfile({
+      full_name: fd.get("full_name"),
+      nickname: fd.get("nickname") || null,
+    });
+    currentUser.full_name = updated.full_name;
+    currentUser.nickname = updated.nickname;
+    document.getElementById("userBadge").textContent = `${updated.full_name} (${updated.role === "admin" ? "Admin" : "Mitglied"})`;
+    msgEl.textContent = "Gespeichert.";
+    msgEl.classList.add("success");
+  } catch (err) {
+    msgEl.textContent = err.detail || "Speichern fehlgeschlagen.";
+    msgEl.classList.add("error");
+  }
+});
+
+document.querySelectorAll('input[name="leaderboardDisplay"]').forEach(radio => {
+  radio.addEventListener("change", async (e) => {
+    const msgEl = document.getElementById("leaderboardDisplayMsg");
+    msgEl.textContent = "";
+    msgEl.classList.remove("error", "success");
+    try {
+      await Api.setLeaderboardDisplay(e.target.value);
+      msgEl.textContent = "Gespeichert.";
+      msgEl.classList.add("success");
+      loadProfile();
+    } catch (err) {
+      msgEl.textContent = err.detail || "Aktion fehlgeschlagen.";
+      msgEl.classList.add("error");
+      loadProfile();
+    }
+  });
+});
+
+/* ---------- Cars ---------- */
+async function loadCars() {
+  const container = document.getElementById("carsList");
+  container.innerHTML = `<p class="hint-text">Lade Autos...</p>`;
+  try {
+    const cars = await Api.listCars();
+    if (!cars.length) {
+      container.innerHTML = `<p class="hint-text">Du hast noch kein Auto angelegt.</p>`;
+      return;
+    }
+    container.innerHTML = cars.map(car => `
+      <div class="car-item" data-car-id="${car.id}">
+        <img class="car-item-photo" src="${car.photo_path || "/static/img/avatar-placeholder.png"}" alt="${escapeHtml(car.name)}">
+        <div class="car-item-info">
+          <strong>${escapeHtml(car.name)}</strong>
+          ${car.brand || car.model ? `<span class="hint-text">${escapeHtml([car.brand, car.model].filter(Boolean).join(" "))}</span>` : ""}
+          ${car.is_primary ? `<span class="badge-primary">Hauptauto</span>` : ""}
+        </div>
+        <div class="car-item-actions">
+          <label class="btn btn-secondary file-upload-btn btn-sm">
+            Foto
+            <input type="file" class="car-photo-input" accept="image/png,image/jpeg,image/webp" hidden>
+          </label>
+          ${!car.is_primary ? `<button class="btn btn-secondary btn-sm car-make-primary-btn">Als Hauptauto</button>` : ""}
+          <button class="btn btn-ghost btn-sm car-delete-btn">Loeschen</button>
+        </div>
+      </div>
+    `).join("");
+    attachCarHandlers();
+  } catch (err) {
+    container.innerHTML = `<p class="form-msg error">Fehler beim Laden: ${err.detail || err.message}</p>`;
+  }
+}
+
+function attachCarHandlers() {
+  document.querySelectorAll(".car-item").forEach(item => {
+    const carId = item.dataset.carId;
+
+    const photoInput = item.querySelector(".car-photo-input");
+    photoInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (!AVATAR_ALLOWED_TYPES.includes(file.type)) {
+        showToast("Nur JPEG-, PNG- oder WebP-Bilder sind erlaubt.", "error");
+        e.target.value = "";
+        return;
+      }
+      if (file.size > AVATAR_MAX_BYTES) {
+        showToast("Datei ist zu gross, maximal 2 MB erlaubt.", "error");
+        e.target.value = "";
+        return;
+      }
+      try {
+        await Api.uploadCarPhoto(carId, file);
+        showToast("Auto-Foto aktualisiert.", "success");
+        loadCars();
+      } catch (err) {
+        showToast(err.detail || "Upload fehlgeschlagen.", "error");
+      }
+    });
+
+    const primaryBtn = item.querySelector(".car-make-primary-btn");
+    if (primaryBtn) {
+      primaryBtn.addEventListener("click", async () => {
+        try {
+          await Api.updateCar(carId, { is_primary: true });
+          showToast("Hauptauto aktualisiert.", "success");
+          loadCars();
+        } catch (err) {
+          showToast(err.detail || "Aktion fehlgeschlagen.", "error");
+        }
+      });
+    }
+
+    const deleteBtn = item.querySelector(".car-delete-btn");
+    deleteBtn.addEventListener("click", async () => {
+      if (!confirm("Dieses Auto wirklich loeschen?")) return;
+      try {
+        await Api.deleteCar(carId);
+        showToast("Auto geloescht.", "success");
+        loadCars();
+      } catch (err) {
+        showToast(err.detail || "Loeschen fehlgeschlagen.", "error");
+      }
+    });
+  });
+}
+
+document.getElementById("createCarForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msgEl = document.getElementById("createCarMsg");
+  msgEl.textContent = "";
+  msgEl.classList.remove("error", "success");
+  const fd = new FormData(e.target);
+  try {
+    await Api.createCar({
+      name: fd.get("name"),
+      brand: fd.get("brand") || null,
+      model: fd.get("model") || null,
+    });
+    msgEl.textContent = "Auto angelegt.";
+    msgEl.classList.add("success");
+    e.target.reset();
+    loadCars();
+  } catch (err) {
+    msgEl.textContent = err.detail || "Anlegen fehlgeschlagen.";
+    msgEl.classList.add("error");
+  }
+});
+
+document.getElementById("leaderboardOptInToggle").addEventListener("change", async (e) => {
+  const msgEl = document.getElementById("leaderboardOptInMsg");
+  msgEl.textContent = "";
+  msgEl.classList.remove("error", "success");
+  try {
+    const rewards = await Api.setLeaderboardOptIn(e.target.checked);
+    msgEl.textContent = rewards.leaderboard_opt_in
+      ? "Du bist jetzt auf dem Leaderboard sichtbar."
+      : "Du bist nicht mehr auf dem Leaderboard sichtbar.";
+    msgEl.classList.add("success");
+  } catch (err) {
+    e.target.checked = !e.target.checked;
+    msgEl.textContent = err.detail || "Aktion fehlgeschlagen.";
+    msgEl.classList.add("error");
+  }
+});
+
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const AVATAR_ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+document.getElementById("avatarFileInput").addEventListener("change", async (e) => {
+  const msgEl = document.getElementById("avatarMsg");
+  msgEl.textContent = "";
+  msgEl.classList.remove("error", "success");
+
+  const file = e.target.files[0];
+  if (!file) return;
+
+  // Client-seitige Vorabpruefung fuer schnelles Feedback. Die eigentliche,
+  // massgebliche Pruefung von Dateityp, Groesse und Bildinhalt erfolgt serverseitig.
+  if (!AVATAR_ALLOWED_TYPES.includes(file.type)) {
+    msgEl.textContent = "Nur JPEG-, PNG- oder WebP-Bilder sind erlaubt.";
+    msgEl.classList.add("error");
+    e.target.value = "";
+    return;
+  }
+  if (file.size > AVATAR_MAX_BYTES) {
+    msgEl.textContent = "Datei ist zu gross, maximal 2 MB erlaubt.";
+    msgEl.classList.add("error");
+    e.target.value = "";
+    return;
+  }
+
+  msgEl.textContent = "Bild wird hochgeladen...";
+  try {
+    const result = await Api.uploadAvatar(file);
+    document.getElementById("profileAvatarPreview").src = result.avatar_path;
+    if (currentUser) currentUser.avatar_path = result.avatar_path;
+    msgEl.textContent = "Profilbild erfolgreich aktualisiert.";
+    msgEl.classList.add("success");
+  } catch (err) {
+    msgEl.textContent = err.detail || "Upload fehlgeschlagen.";
+    msgEl.classList.add("error");
+  } finally {
+    e.target.value = "";
+  }
+});

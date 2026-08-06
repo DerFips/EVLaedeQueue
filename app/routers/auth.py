@@ -7,7 +7,7 @@ from app.db.session import get_db
 from app.models.models import User, UserRole, RefreshToken
 from app.schemas import (
     UserRegister, UserLogin, UserOut, TokenPair, RefreshRequest,
-    PasswordResetRequest, PasswordResetConfirm, PasswordChange,
+    PasswordResetRequest, PasswordResetConfirm, PasswordChange, UserProfileUpdate,
 )
 from app.security import (
     hash_password, verify_password, create_access_token,
@@ -103,6 +103,21 @@ def logout(payload: RefreshRequest, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=UserOut)
 def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
+@router.put("/me", response_model=UserOut)
+def update_me(
+    payload: UserProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if "full_name" in payload.model_fields_set and payload.full_name is not None:
+        current_user.full_name = payload.full_name
+    if "nickname" in payload.model_fields_set:
+        current_user.nickname = payload.nickname
+    db.commit()
+    db.refresh(current_user)
     return current_user
 
 

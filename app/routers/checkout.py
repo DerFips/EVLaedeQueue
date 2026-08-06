@@ -12,6 +12,7 @@ from app.models.models import (
 from app.schemas_checkout import CheckoutInitiateResponse, CheckoutActionResponse
 from app.deps import get_current_user
 from app.email_service import send_email, build_queue_notification_email
+from app.rewards import points_for_offer
 
 router = APIRouter(prefix="/api/v1/checkout", tags=["checkout"])
 
@@ -60,6 +61,14 @@ async def _notify_and_complete(session_obj: ChargingSession, entry: QueueEntry, 
 
     entry.status = QueueStatus.NOTIFIED
     entry.notified_at = datetime.now(timezone.utc)
+
+    # Belohnungs-Anspruch (AP10) wird hier nur VORGEMERKT, nicht ausgezahlt. Die
+    # tatsaechliche Gutschrift erfolgt erst beim Check-in der wartenden Person
+    # (siehe app/routers/charging.py), damit Punkte nicht fuer ein Angebot vergeben
+    # werden, das gar nicht genutzt wird.
+    entry.benefactor_user_id = session_obj.user_id
+    entry.reward_points_pending = points_for_offer(entry.parking_offer)
+
     db.commit()
 
     _complete_session(session_obj, db)

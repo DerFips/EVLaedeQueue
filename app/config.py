@@ -26,6 +26,9 @@ class Settings(BaseSettings):
 
     cors_allowed_origins: str = "http://localhost:3000"
 
+    avatar_max_upload_bytes: int = 2 * 1024 * 1024
+    avatar_output_size_px: int = 256
+
     admin_bootstrap_email: str = ""
     admin_bootstrap_password: str = ""
 

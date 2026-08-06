@@ -20,6 +20,7 @@ from app.routers import charging as charging_router
 from app.routers import queue as queue_router
 from app.routers import checkout as checkout_router
 from app.routers import mobile as mobile_router
+from app.routers import rewards as rewards_router
 
 API_V1_PREFIX = "/api/v1"
 
@@ -30,6 +31,7 @@ tags_metadata = [
     {"name": "queue", "description": "Warteschlangen-Verwaltung inkl. Parkplatz-Tauschangebot."},
     {"name": "checkout", "description": "Abstoepsel-Workflow mit Benachrichtigung/Ueberspringen."},
     {"name": "mobile", "description": "Schnittstellen speziell fuer die mobile App (Geraete-Registrierung, Dashboard)."},
+    {"name": "rewards", "description": "Belohnungspunkte, Leaderboard-Opt-In und Profilbild-Upload."},
 ]
 
 
@@ -106,6 +108,7 @@ app.include_router(charging_router.router)
 app.include_router(queue_router.router)
 app.include_router(checkout_router.router)
 app.include_router(mobile_router.router)
+app.include_router(rewards_router.router)
 
 
 @app.get(f"{API_V1_PREFIX}/health", tags=["health"])
