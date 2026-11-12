@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.db.session import get_db
 from app.models.models import (
@@ -9,6 +9,7 @@ from app.models.models import (
 )
 from app.schemas_mobile import DeviceTokenRegister, DeviceTokenOut, MobileDashboardOut
 from app.deps import get_current_user
+from app.routers.charging import point_occupancy
 
 router = APIRouter(prefix="/api/v1/mobile", tags=["mobile"])
 
@@ -19,6 +20,12 @@ def register_device_token(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # Ein Geraete-Token gehoert genau einem Geraet. Meldet sich dort jemand anderes an,
+    # darf die vorherige Person keine Pushes mehr auf dieses Geraet bekommen.
+    db.query(DeviceToken).filter(
+        DeviceToken.push_token == payload.push_token, DeviceToken.user_id != current_user.id
+    ).delete(synchronize_session=False)
+
     existing = (
         db.query(DeviceToken)
         .filter(DeviceToken.user_id == current_user.id, DeviceToken.push_token == payload.push_token)
@@ -111,22 +118,16 @@ def get_mobile_dashboard(
 
     locations = (
         db.query(Location)
-        .options(joinedload(Location.charging_points))
+        .options(selectinload(Location.charging_points))
         .filter(Location.is_active == True)  # noqa: E712
+        .order_by(Location.name)
         .all()
     )
+    active, _ = point_occupancy([cp.id for loc in locations for cp in loc.charging_points], db)
     locations_summary = []
     for loc in locations:
         total_points = len(loc.charging_points)
-        occupied = 0
-        for cp in loc.charging_points:
-            has_active = (
-                db.query(ChargingSession)
-                .filter(ChargingSession.charging_point_id == cp.id, ChargingSession.status == ChargingSessionStatus.ACTIVE)
-                .first()
-            )
-            if has_active:
-                occupied += 1
+        occupied = sum(1 for cp in loc.charging_points if cp.id in active)
         locations_summary.append({
             "location_id": loc.id,
             "name": loc.name,

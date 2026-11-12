@@ -1,6 +1,26 @@
 from pydantic import BaseModel, field_validator
 
 
+def _car_name(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip()
+    if len(v) < 1:
+        raise ValueError("Name darf nicht leer sein")
+    if len(v) > 100:
+        raise ValueError("Name darf maximal 100 Zeichen lang sein")
+    return v
+
+
+def _car_text(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip()
+    if len(v) > 100:
+        raise ValueError("Marke/Modell darf maximal 100 Zeichen lang sein")
+    return v or None
+
+
 class LeaderboardOptInRequest(BaseModel):
     leaderboard_opt_in: bool
 
@@ -43,12 +63,12 @@ class CarCreateRequest(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        v = v.strip()
-        if len(v) < 1:
-            raise ValueError("Name darf nicht leer sein")
-        if len(v) > 100:
-            raise ValueError("Name darf maximal 100 Zeichen lang sein")
-        return v
+        return _car_name(v)
+
+    @field_validator("brand", "model")
+    @classmethod
+    def validate_text(cls, v):
+        return _car_text(v)
 
 
 class CarUpdateRequest(BaseModel):
@@ -56,6 +76,16 @@ class CarUpdateRequest(BaseModel):
     brand: str | None = None
     model: str | None = None
     is_primary: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v):
+        return _car_name(v)
+
+    @field_validator("brand", "model")
+    @classmethod
+    def validate_text(cls, v):
+        return _car_text(v)
 
 
 class CarOut(BaseModel):

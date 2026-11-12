@@ -6,7 +6,6 @@ class CheckoutInitiateResponse(BaseModel):
     message: str
     pending_entry_id: str | None = None
     pending_user_parking_offer: str | None = None
-    notified_user_email: str | None = None
 
 
 class CheckoutActionResponse(BaseModel):
@@ -14,4 +13,3 @@ class CheckoutActionResponse(BaseModel):
     message: str
     pending_entry_id: str | None = None
     pending_user_parking_offer: str | None = None
-    notified_user_email: str | None = None

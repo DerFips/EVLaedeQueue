@@ -149,6 +149,14 @@ Index(
     unique=True,
     sqlite_where=ChargingSession.status == ChargingSessionStatus.ACTIVE,
 )
+# Ein Nutzer darf nur einen aktiven Ladevorgang haben; die Pruefung im Check-in allein
+# ist bei zwei gleichzeitigen Anfragen nicht dicht.
+Index(
+    "ux_one_active_session_per_user",
+    ChargingSession.user_id,
+    unique=True,
+    sqlite_where=ChargingSession.status == ChargingSessionStatus.ACTIVE,
+)
 
 
 class QueueEntry(Base):
@@ -229,3 +237,11 @@ class PointTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="point_transactions")
+
+
+Index("ix_queue_entries_point_status", QueueEntry.charging_point_id, QueueEntry.status, QueueEntry.position)
+Index("ix_queue_entries_user_status", QueueEntry.user_id, QueueEntry.status)
+Index("ix_charging_points_location", ChargingPoint.location_id)
+Index("ix_refresh_tokens_user", RefreshToken.user_id)
+Index("ix_cars_owner", Car.owner_id)
+Index("ix_users_leaderboard", User.leaderboard_opt_in, User.reward_points)

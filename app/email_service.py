@@ -35,6 +35,21 @@ async def send_email(to_email: str, subject: str, body: str) -> bool:
         return False
 
 
+def build_password_reset_email(reset_url: str) -> tuple[str, str]:
+    subject = "Passwort zuruecksetzen"
+    body = (
+        f"Hallo,\n\n"
+        f"du (oder jemand anderes) hat angefordert, das Passwort fuer dieses Konto "
+        f"zurueckzusetzen. Falls du das warst, oeffne den folgenden Link, um ein neues "
+        f"Passwort zu vergeben:\n\n"
+        f"{reset_url}\n\n"
+        f"Der Link ist 30 Minuten gueltig. Falls du diese Anfrage nicht gestellt hast, "
+        f"kannst du diese E-Mail ignorieren, dein Passwort bleibt unveraendert.\n\n"
+        f"Viele Gruesse\nDein EVLädeQueue-Team"
+    )
+    return subject, body
+
+
 def build_queue_notification_email(location_name: str, charging_point_label: str) -> tuple[str, str]:
     subject = f"Ladepunkt {charging_point_label} an {location_name} wird frei"
     body = (

@@ -20,10 +20,15 @@ def join_queue(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    point = db.query(ChargingPoint).filter(ChargingPoint.id == point_id).first()
+    point = (
+        db.query(ChargingPoint)
+        .options(joinedload(ChargingPoint.location))
+        .filter(ChargingPoint.id == point_id)
+        .first()
+    )
     if not point:
         raise HTTPException(status_code=404, detail="Ladepunkt nicht gefunden")
-    if not point.is_active:
+    if not point.is_active or not point.location.is_active:
         raise HTTPException(status_code=400, detail="Ladepunkt ist deaktiviert")
 
     active_session = (

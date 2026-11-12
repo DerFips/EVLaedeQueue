@@ -89,6 +89,7 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const msgEl = document.getElementById("loginMsg");
   msgEl.textContent = "";
+  msgEl.classList.remove("error", "success");
   const fd = new FormData(e.target);
   try {
     const data = await Api.login({ email: fd.get("email"), password: fd.get("password") });
@@ -123,6 +124,62 @@ document.getElementById("registerForm").addEventListener("submit", async (e) => 
   }
 });
 
+/* ---------- Passwort zuruecksetzen ---------- */
+document.getElementById("forgotPasswordBtn").addEventListener("click", async () => {
+  const msgEl = document.getElementById("loginMsg");
+  msgEl.classList.remove("error", "success");
+  const email = document.querySelector('#loginForm input[name="email"]').value.trim();
+  if (!email) {
+    msgEl.textContent = "Bitte zuerst deine E-Mail-Adresse eintragen.";
+    msgEl.classList.add("error");
+    return;
+  }
+  try {
+    await Api.requestPasswordReset(email);
+    msgEl.textContent = "Falls die E-Mail existiert, wurde ein Reset-Link versendet.";
+    msgEl.classList.add("success");
+  } catch (err) {
+    msgEl.textContent = err.detail || "Anfrage fehlgeschlagen.";
+    msgEl.classList.add("error");
+  }
+});
+
+function resetTokenFromUrl() {
+  if (window.location.pathname !== "/reset-password") return null;
+  return new URLSearchParams(window.location.hash.slice(1)).get("token");
+}
+
+function showResetPasswordForm() {
+  setLoggedOutUI();
+  document.querySelector(".auth-tabs").classList.add("hidden");
+  document.getElementById("loginForm").classList.add("hidden");
+  document.getElementById("registerForm").classList.add("hidden");
+  document.getElementById("resetPasswordForm").classList.remove("hidden");
+}
+
+document.getElementById("resetPasswordForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msgEl = document.getElementById("resetPasswordMsg");
+  msgEl.textContent = "";
+  msgEl.classList.remove("error", "success");
+  try {
+    await Api.confirmPasswordReset(resetTokenFromUrl(), new FormData(e.target).get("new_password"));
+    // Token aus der Adresszeile entfernen und zur normalen Anmeldung zurueck.
+    window.history.replaceState(null, "", "/");
+    e.target.reset();
+    e.target.classList.add("hidden");
+    document.querySelector(".auth-tabs").classList.remove("hidden");
+    document.getElementById("loginForm").classList.remove("hidden");
+    const loginMsg = document.getElementById("loginMsg");
+    loginMsg.textContent = "Passwort geaendert. Du kannst dich jetzt anmelden.";
+    loginMsg.classList.remove("error");
+    loginMsg.classList.add("success");
+  } catch (err) {
+    msgEl.textContent = err.detail || "Zuruecksetzen fehlgeschlagen.";
+    msgEl.classList.add("error");
+  }
+});
+
 document.getElementById("logoutBtn").addEventListener("click", async () => {
   try { await Api.logout(); } catch (_) { /* ignore */ }
   setLoggedOutUI();
@@ -146,7 +203,7 @@ async function loadDashboard() {
     container.innerHTML = locations.map(renderLocationCard).join("");
     attachDashboardHandlers();
   } catch (err) {
-    container.innerHTML = `<p class="empty-state">Fehler beim Laden: ${err.detail || err.message}</p>`;
+    container.innerHTML = `<p class="empty-state">Fehler beim Laden: ${escapeHtml(err.detail || err.message)}</p>`;
   }
 }
 
@@ -269,7 +326,7 @@ async function loadMyStatus() {
     container.innerHTML = html;
     attachStatusHandlers();
   } catch (err) {
-    container.innerHTML = `<p class="empty-state">Fehler beim Laden: ${err.detail || err.message}</p>`;
+    container.innerHTML = `<p class="empty-state">Fehler beim Laden: ${escapeHtml(err.detail || err.message)}</p>`;
   }
 }
 
@@ -455,7 +512,8 @@ function escapeHtml(str) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function formatDate(isoString) {
@@ -491,7 +549,8 @@ const authCardEl = document.querySelector(".auth-card");
 if (authCardEl) bannerSyncObserver.observe(authCardEl);
 
 /* ---------- Init ---------- */
-tryAutoLogin();
+if (resetTokenFromUrl()) showResetPasswordForm();
+else tryAutoLogin();
 syncBannerWidth();
 
 
@@ -512,7 +571,7 @@ async function loadLeaderboard() {
           ${entries.map(e => `
             <tr>
               <td>#${e.rank}</td>
-              <td><img class="leaderboard-avatar" src="${e.avatar_path || "/static/img/avatar-placeholder.png"}" alt=""></td>
+              <td><img class="leaderboard-avatar" src="${escapeHtml(e.avatar_path || "/static/img/avatar-placeholder.png")}" alt=""></td>
               <td>${escapeHtml(e.display_name)}${e.is_car ? ` <span class="badge-car" title="Zeigt ein Auto">&#128663;</span>` : ""}</td>
               <td>${e.reward_points}</td>
             </tr>
@@ -521,7 +580,7 @@ async function loadLeaderboard() {
       </table>
     `;
   } catch (err) {
-    container.innerHTML = `<p class="form-msg error">Fehler beim Laden: ${err.detail || err.message}</p>`;
+    container.innerHTML = `<p class="form-msg error">Fehler beim Laden: ${escapeHtml(err.detail || err.message)}</p>`;
   }
 }
 
@@ -604,7 +663,7 @@ async function loadCars() {
     }
     container.innerHTML = cars.map(car => `
       <div class="car-item" data-car-id="${car.id}">
-        <img class="car-item-photo" src="${car.photo_path || "/static/img/avatar-placeholder.png"}" alt="${escapeHtml(car.name)}">
+        <img class="car-item-photo" src="${escapeHtml(car.photo_path || "/static/img/avatar-placeholder.png")}" alt="${escapeHtml(car.name)}">
         <div class="car-item-info">
           <strong>${escapeHtml(car.name)}</strong>
           ${car.brand || car.model ? `<span class="hint-text">${escapeHtml([car.brand, car.model].filter(Boolean).join(" "))}</span>` : ""}
@@ -622,7 +681,7 @@ async function loadCars() {
     `).join("");
     attachCarHandlers();
   } catch (err) {
-    container.innerHTML = `<p class="form-msg error">Fehler beim Laden: ${err.detail || err.message}</p>`;
+    container.innerHTML = `<p class="form-msg error">Fehler beim Laden: ${escapeHtml(err.detail || err.message)}</p>`;
   }
 }
 

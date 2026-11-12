@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models.models import Location, ChargingPoint, User, QueueEntry, ChargingSession, QueueStatus
+from app.models.models import (
+    Location, ChargingPoint, User, QueueEntry, ChargingSession, ChargingSessionStatus,
+    QueueStatus, PointTransaction,
+)
 from app.schemas_admin import (
     LocationCreate, LocationUpdate, LocationOut, LocationDetailOut,
     ChargingPointCreate, ChargingPointUpdate, ChargingPointOut,
@@ -10,6 +13,35 @@ from app.schemas_admin import (
 from app.deps import get_current_admin
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+
+def _has_open_usage(point_ids: list[str], db: Session) -> bool:
+    if not point_ids:
+        return False
+    active_session = (
+        db.query(ChargingSession.id)
+        .filter(ChargingSession.charging_point_id.in_(point_ids), ChargingSession.status == ChargingSessionStatus.ACTIVE)
+        .first()
+    )
+    waiting = (
+        db.query(QueueEntry.id)
+        .filter(QueueEntry.charging_point_id.in_(point_ids), QueueEntry.status == QueueStatus.WAITING)
+        .first()
+    )
+    return bool(active_session or waiting)
+
+
+def _delete_point_history(point_ids: list[str], db: Session) -> None:
+    """Entfernt abgeschlossene Ladevorgaenge und Warteschlangeneintraege der Ladepunkte.
+    Ohne das scheitert das Loeschen jedes jemals benutzten Ladepunkts: die Kind-Zeilen
+    verweisen per NOT-NULL-Fremdschluessel auf ihn. Bereits gutgeschriebene Punkte
+    (users.reward_points) bleiben erhalten, nur die Protokollzeilen entfallen."""
+    if not point_ids:
+        return
+    entry_ids = db.query(QueueEntry.id).filter(QueueEntry.charging_point_id.in_(point_ids))
+    db.query(PointTransaction).filter(PointTransaction.queue_entry_id.in_(entry_ids)).delete(synchronize_session=False)
+    db.query(QueueEntry).filter(QueueEntry.charging_point_id.in_(point_ids)).delete(synchronize_session=False)
+    db.query(ChargingSession).filter(ChargingSession.charging_point_id.in_(point_ids)).delete(synchronize_session=False)
 
 
 @router.post("/locations", response_model=LocationOut, status_code=status.HTTP_201_CREATED)
@@ -47,7 +79,7 @@ def get_location(
 ):
     location = (
         db.query(Location)
-        .options(joinedload(Location.charging_points))
+        .options(selectinload(Location.charging_points))
         .filter(Location.id == location_id)
         .first()
     )
@@ -86,24 +118,14 @@ def delete_location(
     if not location:
         raise HTTPException(status_code=404, detail="Standort nicht gefunden")
 
-    active_sessions = (
-        db.query(ChargingSession)
-        .join(ChargingPoint, ChargingSession.charging_point_id == ChargingPoint.id)
-        .filter(ChargingPoint.location_id == location_id, ChargingSession.status == "active")
-        .count()
-    )
-    active_queue = (
-        db.query(QueueEntry)
-        .join(ChargingPoint, QueueEntry.charging_point_id == ChargingPoint.id)
-        .filter(ChargingPoint.location_id == location_id, QueueEntry.status == QueueStatus.WAITING)
-        .count()
-    )
-    if active_sessions > 0 or active_queue > 0:
+    point_ids = [pid for (pid,) in db.query(ChargingPoint.id).filter(ChargingPoint.location_id == location_id)]
+    if _has_open_usage(point_ids, db):
         raise HTTPException(
             status_code=400,
             detail="Standort kann nicht geloescht werden: aktive Ladevorgaenge oder Warteschlangen vorhanden",
         )
 
+    _delete_point_history(point_ids, db)
     db.delete(location)
     db.commit()
     return None
@@ -165,6 +187,18 @@ def update_charging_point(
         raise HTTPException(status_code=404, detail="Ladepunkt nicht gefunden")
 
     update_data = payload.model_dump(exclude_unset=True)
+    if "label" in update_data and update_data["label"] != point.label:
+        duplicate = (
+            db.query(ChargingPoint.id)
+            .filter(
+                ChargingPoint.location_id == point.location_id,
+                ChargingPoint.label == update_data["label"],
+                ChargingPoint.id != point.id,
+            )
+            .first()
+        )
+        if duplicate:
+            raise HTTPException(status_code=400, detail="Ladepunkt-Label existiert an diesem Standort bereits")
     for field, value in update_data.items():
         setattr(point, field, value)
 
@@ -183,22 +217,13 @@ def delete_charging_point(
     if not point:
         raise HTTPException(status_code=404, detail="Ladepunkt nicht gefunden")
 
-    active_session = (
-        db.query(ChargingSession)
-        .filter(ChargingSession.charging_point_id == point_id, ChargingSession.status == "active")
-        .first()
-    )
-    active_queue = (
-        db.query(QueueEntry)
-        .filter(QueueEntry.charging_point_id == point_id, QueueEntry.status == QueueStatus.WAITING)
-        .first()
-    )
-    if active_session or active_queue:
+    if _has_open_usage([point_id], db):
         raise HTTPException(
             status_code=400,
             detail="Ladepunkt kann nicht geloescht werden: aktiver Ladevorgang oder Warteschlange vorhanden",
         )
 
+    _delete_point_history([point_id], db)
     db.delete(point)
     db.commit()
     return None

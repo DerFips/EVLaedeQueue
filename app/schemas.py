@@ -1,5 +1,5 @@
 import re
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 PASSWORD_MIN_LENGTH = 10
@@ -26,7 +26,7 @@ class UserRegister(BaseModel):
     email: EmailStr
     password: str
     full_name: str
-    phone: str | None = None
+    phone: str | None = Field(default=None, max_length=50)
 
     @field_validator("password")
     @classmethod
@@ -46,7 +46,8 @@ class UserRegister(BaseModel):
 
 class UserLogin(BaseModel):
     email: EmailStr
-    password: str
+    # Obergrenze, damit niemand Argon2 mit riesigen Eingaben beschaeftigt.
+    password: str = Field(max_length=1024)
 
 
 class UserOut(BaseModel):
@@ -101,7 +102,7 @@ class TokenPair(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str = Field(max_length=512)
 
 
 class PasswordResetRequest(BaseModel):
@@ -109,7 +110,7 @@ class PasswordResetRequest(BaseModel):
 
 
 class PasswordResetConfirm(BaseModel):
-    token: str
+    token: str = Field(max_length=2048)
     new_password: str
 
     @field_validator("new_password")
@@ -119,7 +120,7 @@ class PasswordResetConfirm(BaseModel):
 
 
 class PasswordChange(BaseModel):
-    current_password: str
+    current_password: str = Field(max_length=1024)
     new_password: str
 
     @field_validator("new_password")

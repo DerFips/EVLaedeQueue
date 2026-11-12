@@ -52,7 +52,16 @@
             <input type="password" name="password" required placeholder="********">
           </label>
           <button type="submit" class="btn btn-primary btn-block">Anmelden</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="forgotPasswordBtn">Passwort vergessen?</button>
           <p class="form-msg" id="loginMsg"></p>
+        </form>
+
+        <form id="resetPasswordForm" class="auth-form hidden">
+          <label>Neues Passwort
+            <input type="password" name="new_password" required autocomplete="new-password" placeholder="Min. 10 Zeichen, Gross-/Kleinbuchstaben, Ziffer">
+          </label>
+          <button type="submit" class="btn btn-primary btn-block">Passwort speichern</button>
+          <p class="form-msg" id="resetPasswordMsg"></p>
         </form>
 
 

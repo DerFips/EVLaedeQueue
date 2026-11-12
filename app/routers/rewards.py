@@ -7,8 +7,9 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import desc
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.db.session import get_db
@@ -23,6 +24,10 @@ from app.config import settings
 router = APIRouter(prefix="/api/v1/rewards", tags=["rewards"])
 
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+# Schutz vor "Dekompressionsbomben": kleine, hochkomprimierte Dateien, die beim Dekodieren
+# eine riesige Pixelanzahl (und damit RAM-Verbrauch) erzeugen. Deckt grosszuegig auch
+# hochaufloesende Handyfotos ab (bis ca. 6000x6666 Pixel).
+MAX_IMAGE_PIXELS = 40_000_000
 STATIC_ROOT = Path(__file__).resolve().parent.parent / "static"
 AVATAR_DIR = STATIC_ROOT / "avatars"
 CAR_PHOTO_DIR = STATIC_ROOT / "cars"
@@ -37,8 +42,10 @@ def _process_and_save_image(raw_bytes: bytes, target_dir: Path) -> str:
         image = Image.open(io.BytesIO(raw_bytes))
         image.verify()
         image = Image.open(io.BytesIO(raw_bytes))
+        if image.width * image.height > MAX_IMAGE_PIXELS:
+            raise HTTPException(status_code=400, detail="Bildaufloesung ist zu hoch")
         image.load()
-    except (UnidentifiedImageError, OSError):
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
         raise HTTPException(status_code=400, detail="Datei ist kein gueltiges Bild")
 
     image = ImageOps.exif_transpose(image)
@@ -148,6 +155,7 @@ def get_leaderboard(
     limit = max(1, min(limit, 100))
     users = (
         db.query(User)
+        .options(selectinload(User.cars))
         .filter(User.leaderboard_opt_in == True)  # noqa: E712
         .order_by(desc(User.reward_points), User.created_at.asc())
         .limit(limit)
@@ -173,7 +181,7 @@ async def upload_avatar(
     db: Session = Depends(get_db),
 ):
     raw_bytes = await _read_and_validate_upload(file)
-    filename = _process_and_save_image(raw_bytes, AVATAR_DIR)
+    filename = await run_in_threadpool(_process_and_save_image, raw_bytes, AVATAR_DIR)
 
     old_avatar = current_user.avatar_path
     current_user.avatar_path = f"/static/avatars/{filename}"
@@ -202,6 +210,8 @@ def create_car(
     db: Session = Depends(get_db),
 ):
     existing_count = db.query(Car).filter(Car.owner_id == current_user.id).count()
+    if existing_count >= settings.max_cars_per_user:
+        raise HTTPException(status_code=400, detail=f"Maximal {settings.max_cars_per_user} Autos pro Konto")
     car = Car(
         owner_id=current_user.id,
         name=payload.name,
@@ -233,9 +243,10 @@ def update_car(
 
     if payload.name is not None:
         car.name = payload.name
-    if payload.brand is not None:
+    # brand/model duerfen per ausdruecklichem null bzw. leerem Text geleert werden.
+    if "brand" in payload.model_fields_set:
         car.brand = payload.brand
-    if payload.model is not None:
+    if "model" in payload.model_fields_set:
         car.model = payload.model
     if payload.is_primary is True:
         db.query(Car).filter(Car.owner_id == current_user.id, Car.id != car.id).update({"is_primary": False})
@@ -284,7 +295,7 @@ async def upload_car_photo(
 ):
     car = _get_owned_car_or_404(car_id, current_user, db)
     raw_bytes = await _read_and_validate_upload(file)
-    filename = _process_and_save_image(raw_bytes, CAR_PHOTO_DIR)
+    filename = await run_in_threadpool(_process_and_save_image, raw_bytes, CAR_PHOTO_DIR)
 
     old_photo = car.photo_path
     car.photo_path = f"/static/cars/{filename}"

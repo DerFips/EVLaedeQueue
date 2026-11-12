@@ -12,6 +12,10 @@ services:
       - .env
     volumes:
       - ladeplatz-data:/app/data
+      # Hochgeladene Profilbilder und Auto-Fotos liegen ausserhalb von /app/data und
+      # gingen ohne eigenes Volume bei jedem Neubau des Containers verloren.
+      - ladeplatz-avatars:/app/app/static/avatars
+      - ladeplatz-cars:/app/app/static/cars
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 30s
@@ -23,6 +27,10 @@ services:
 
 volumes:
   ladeplatz-data:
+    driver: local
+  ladeplatz-avatars:
+    driver: local
+  ladeplatz-cars:
     driver: local
 
 networks:

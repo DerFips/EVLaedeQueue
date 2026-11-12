@@ -1,9 +1,21 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.config import settings
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+_is_sqlite = settings.database_url.startswith("sqlite")
+connect_args = {"check_same_thread": False, "timeout": 15} if _is_sqlite else {}
 engine = create_engine(settings.database_url, connect_args=connect_args, echo=settings.app_debug)
+
+if _is_sqlite:
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _record):
+        cursor = dbapi_connection.cursor()
+        # WAL: Leser blockieren Schreiber nicht mehr; NORMAL ist mit WAL crash-sicher.
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        # SQLite erzwingt Fremdschluessel nur, wenn das pro Verbindung eingeschaltet wird.
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

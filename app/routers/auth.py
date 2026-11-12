@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -12,11 +12,12 @@ from app.schemas import (
 from app.security import (
     hash_password, verify_password, create_access_token,
     create_refresh_token_value, hash_token, create_password_reset_token,
-    decode_password_reset_token,
+    decode_password_reset_token, reset_token_matches_password, DUMMY_PASSWORD_HASH,
 )
 from app.config import settings
 from app.deps import get_current_user
 from app.rate_limit import limiter
+from app.email_service import send_email, build_password_reset_email
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -44,6 +45,12 @@ def register(request: Request, payload: UserRegister, db: Session = Depends(get_
 
 
 def _issue_token_pair(user: User, db: Session) -> TokenPair:
+    # Abgelaufene Refresh-Tokens dieses Nutzers entfernen, sonst waechst die Tabelle
+    # mit jeder Rotation unbegrenzt. Widerrufene, noch nicht abgelaufene bleiben fuer
+    # die Replay-Erkennung erhalten.
+    db.query(RefreshToken).filter(
+        RefreshToken.user_id == user.id, RefreshToken.expires_at < datetime.now(timezone.utc)
+    ).delete(synchronize_session=False)
     access_token = create_access_token(subject=user.id, role=user.role.value)
     refresh_value = create_refresh_token_value()
     refresh_record = RefreshToken(
@@ -62,7 +69,10 @@ def _issue_token_pair(user: User, db: Session) -> TokenPair:
 def login(request: Request, payload: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == payload.email.lower()).first()
     invalid_credentials = HTTPException(status_code=401, detail="Ungueltige Anmeldedaten")
-    if not user or not verify_password(payload.password, user.hashed_password):
+    # Passwort wird auch bei unbekannter E-Mail gegen einen Dummy-Hash geprueft, damit die
+    # Antwortzeit nicht verraet, ob das Konto existiert (Timing-Angriff/User-Enumeration).
+    password_ok = verify_password(payload.password, user.hashed_password if user else DUMMY_PASSWORD_HASH)
+    if not user or not password_ok:
         raise invalid_credentials
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Konto ist deaktiviert")
@@ -76,7 +86,17 @@ def refresh_token(request: Request, payload: RefreshRequest, db: Session = Depen
     record = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
 
     invalid = HTTPException(status_code=401, detail="Ungueltiges Refresh-Token")
-    if not record or record.revoked:
+    if not record:
+        raise invalid
+    if record.revoked:
+        # Wiederverwendung eines bereits rotierten/widerrufenen Refresh-Tokens deutet auf
+        # Diebstahl hin (z. B. ein altes Token wurde kopiert, bevor es durch Rotation
+        # widerrufen wurde). Als Vorsichtsmassnahme werden alle Refresh-Tokens dieses
+        # Nutzers widerrufen, sodass ein gestohlenes Token keinen dauerhaften Zugriff mehr hat.
+        db.query(RefreshToken).filter(
+            RefreshToken.user_id == record.user_id, RefreshToken.revoked == False  # noqa: E712
+        ).update({"revoked": True})
+        db.commit()
         raise invalid
     if record.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
         raise invalid
@@ -122,7 +142,9 @@ def update_me(
 
 
 @router.post("/password/change", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("5/minute")
 def change_password(
+    request: Request,
     payload: PasswordChange,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -130,7 +152,6 @@ def change_password(
     if not verify_password(payload.current_password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="Aktuelles Passwort ist falsch")
     current_user.hashed_password = hash_password(payload.new_password)
-    db.commit()
     db.query(RefreshToken).filter(RefreshToken.user_id == current_user.id).update({"revoked": True})
     db.commit()
     return None
@@ -138,24 +159,37 @@ def change_password(
 
 @router.post("/password/reset-request", status_code=status.HTTP_202_ACCEPTED)
 @limiter.limit("3/minute")
-def request_password_reset(request: Request, payload: PasswordResetRequest, db: Session = Depends(get_db)):
+def request_password_reset(
+    request: Request,
+    payload: PasswordResetRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     user = db.query(User).filter(User.email == payload.email.lower()).first()
-    if user:
-        token = create_password_reset_token(user.id)
-        _ = token
+    if user and user.is_active:
+        token = create_password_reset_token(user.id, user.hashed_password)
+        # Token im URL-Fragment: wird weder an den Server gesendet (Access-Logs, Proxys)
+        # noch per Referer weitergegeben.
+        reset_url = f"{settings.app_base_url.rstrip('/')}/reset-password#token={token}"
+        subject, body = build_password_reset_email(reset_url)
+        # Versand erst nach der Antwort: die Antwortzeit verraet so nicht, ob die
+        # Adresse registriert ist, und ein langsamer SMTP-Server bremst niemanden aus.
+        background_tasks.add_task(send_email, user.email, subject, body)
     return {"message": "Falls die E-Mail existiert, wurde ein Reset-Link versendet."}
 
 
 @router.post("/password/reset-confirm", status_code=status.HTTP_204_NO_CONTENT)
-def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def confirm_password_reset(request: Request, payload: PasswordResetConfirm, db: Session = Depends(get_db)):
+    invalid = HTTPException(status_code=400, detail="Ungueltiger oder abgelaufener Token")
     try:
-        user_id = decode_password_reset_token(payload.token)
+        user_id, fingerprint = decode_password_reset_token(payload.token)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Ungueltiger oder abgelaufener Token")
+        raise invalid
 
     user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=400, detail="Ungueltiger Token")
+    if not user or not user.is_active or not reset_token_matches_password(fingerprint, user.hashed_password):
+        raise invalid
 
     user.hashed_password = hash_password(payload.new_password)
     db.query(RefreshToken).filter(RefreshToken.user_id == user.id).update({"revoked": True})

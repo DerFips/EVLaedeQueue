@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
@@ -12,13 +13,14 @@ from app.models.models import (
 from app.schemas_checkout import CheckoutInitiateResponse, CheckoutActionResponse
 from app.deps import get_current_user
 from app.email_service import send_email, build_queue_notification_email
+from app.push_service import send_push, ios_push_tokens_for_user
 from app.rewards import points_for_offer
 
 router = APIRouter(prefix="/api/v1/checkout", tags=["checkout"])
 
 
 class CheckoutDecisionRequest(BaseModel):
-    action: str
+    action: Literal["notify", "skip"]
 
 
 def _get_active_session_or_404(point_id: str, current_user: User, db: Session) -> ChargingSession:
@@ -51,13 +53,34 @@ def _complete_session(session_obj: ChargingSession, db: Session) -> None:
     db.commit()
 
 
-async def _notify_and_complete(session_obj: ChargingSession, entry: QueueEntry, db: Session) -> str:
-    notified_user = db.query(User).filter(User.id == entry.user_id).first()
+def _notify_and_complete(
+    session_obj: ChargingSession, entry: QueueEntry, db: Session, background_tasks: BackgroundTasks
+) -> None:
+    notified_email = db.query(User.email).filter(User.id == entry.user_id).scalar()
     subject, body = build_queue_notification_email(
         location_name=session_obj.charging_point.location.name,
         charging_point_label=session_obj.charging_point.label,
     )
-    await send_email(notified_user.email, subject, body)
+    # Versand nach der Antwort: ein langsamer oder nicht erreichbarer SMTP-Server
+    # (Timeout 10 s) haelt das Abstoepseln sonst entsprechend lange auf.
+    if notified_email:
+        background_tasks.add_task(send_email, notified_email, subject, body)
+
+    # Zusaetzlich per Push an die App der wartenden Person (falls Geraete registriert).
+    push_tokens = ios_push_tokens_for_user(entry.user_id, db)
+    if push_tokens:
+        background_tasks.add_task(
+            send_push,
+            push_tokens,
+            "Du bist an der Reihe",
+            f"{session_obj.charging_point.label} bei {session_obj.charging_point.location.name} "
+            "wird frei. Bitte jetzt einchecken.",
+            {
+                "type": "queue_turn",
+                "charging_point_id": session_obj.charging_point_id,
+                "location_id": session_obj.charging_point.location_id,
+            },
+        )
 
     entry.status = QueueStatus.NOTIFIED
     entry.notified_at = datetime.now(timezone.utc)
@@ -69,15 +92,13 @@ async def _notify_and_complete(session_obj: ChargingSession, entry: QueueEntry, 
     entry.benefactor_user_id = session_obj.user_id
     entry.reward_points_pending = points_for_offer(entry.parking_offer)
 
-    db.commit()
-
     _complete_session(session_obj, db)
-    return notified_user.email
 
 
 @router.post("/charging-points/{point_id}/initiate", response_model=CheckoutInitiateResponse)
-async def initiate_checkout(
+def initiate_checkout(
     point_id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -93,13 +114,12 @@ async def initiate_checkout(
         )
 
     if next_entry.parking_offer == ParkingOfferType.FREE:
-        notified_email = await _notify_and_complete(session_obj, next_entry, db)
+        _notify_and_complete(session_obj, next_entry, db, background_tasks)
         return CheckoutInitiateResponse(
             action="completed",
             message="Naechste Person bietet kostenlosen Parkplatz, wurde automatisch benachrichtigt.",
             pending_entry_id=next_entry.id,
             pending_user_parking_offer=next_entry.parking_offer.value,
-            notified_user_email=notified_email,
         )
 
     session_obj.checkout_pending = True
@@ -113,15 +133,13 @@ async def initiate_checkout(
 
 
 @router.post("/charging-points/{point_id}/decision", response_model=CheckoutActionResponse)
-async def checkout_decision(
+def checkout_decision(
     point_id: str,
+    background_tasks: BackgroundTasks,
     payload: CheckoutDecisionRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if payload.action not in ("notify", "skip"):
-        raise HTTPException(status_code=400, detail="Ungueltige Aktion, erlaubt sind 'notify' oder 'skip'")
-
     session_obj = _get_active_session_or_404(point_id, current_user, db)
     if not session_obj.checkout_pending:
         raise HTTPException(status_code=400, detail="Kein ausstehender Abstoepsel-Vorgang fuer diesen Ladepunkt")
@@ -132,13 +150,12 @@ async def checkout_decision(
         return CheckoutActionResponse(action="completed", message="Warteschlange ist leer, Ladevorgang abgeschlossen.")
 
     if payload.action == "notify":
-        notified_email = await _notify_and_complete(session_obj, current_entry, db)
+        _notify_and_complete(session_obj, current_entry, db, background_tasks)
         return CheckoutActionResponse(
             action="completed",
             message="Wartende Person wurde benachrichtigt, Ladevorgang abgeschlossen.",
             pending_entry_id=current_entry.id,
             pending_user_parking_offer=current_entry.parking_offer.value,
-            notified_user_email=notified_email,
         )
 
     current_entry.status = QueueStatus.SKIPPED
@@ -153,13 +170,12 @@ async def checkout_decision(
         )
 
     if next_entry.parking_offer == ParkingOfferType.FREE:
-        notified_email = await _notify_and_complete(session_obj, next_entry, db)
+        _notify_and_complete(session_obj, next_entry, db, background_tasks)
         return CheckoutActionResponse(
             action="completed",
             message="Person uebersprungen. Naechste Person bietet kostenlosen Parkplatz, automatisch benachrichtigt.",
             pending_entry_id=next_entry.id,
             pending_user_parking_offer=next_entry.parking_offer.value,
-            notified_user_email=notified_email,
         )
 
     return CheckoutActionResponse(

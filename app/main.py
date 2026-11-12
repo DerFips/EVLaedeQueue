@@ -1,9 +1,11 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 from pathlib import Path
@@ -23,6 +25,7 @@ from app.routers import mobile as mobile_router
 from app.routers import rewards as rewards_router
 
 API_V1_PREFIX = "/api/v1"
+logger = logging.getLogger("app")
 
 tags_metadata = [
     {"name": "auth", "description": "Registrierung, Login, Token-Verwaltung."},
@@ -57,9 +60,21 @@ def bootstrap_admin():
         db.close()
 
 
+def ensure_indexes():
+    """create_all legt Indizes nur zusammen mit NEUEN Tabellen an. Fuer bestehende
+    Datenbanken werden nachtraeglich hinzugekommene Indizes hier ergaenzt."""
+    for table in Base.metadata.sorted_tables:
+        for index in table.indexes:
+            try:
+                index.create(bind=engine, checkfirst=True)
+            except Exception as exc:  # noqa: BLE001 - z. B. Unique-Index trifft auf Altdaten
+                logger.warning("Index %s konnte nicht angelegt werden: %s", index.name, exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    ensure_indexes()
     bootstrap_admin()
     yield
 
@@ -82,9 +97,32 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+DOCS_PATHS = (f"{API_V1_PREFIX}/docs", f"{API_V1_PREFIX}/redoc")
+# Datei-Uploads duerfen groesser sein als JSON-Anfragen (Bild + Multipart-Rahmen).
+UPLOAD_BODY_LIMIT = settings.avatar_max_upload_bytes + 64 * 1024
+
+
+@app.middleware("http")
+async def limit_request_body(request, call_next):
+    """Weist uebergrosse Anfragen anhand von Content-Length ab, bevor der Body gelesen
+    (und bei Multipart auf die Platte gespoolt) wird."""
+    if request.method in ("POST", "PUT", "PATCH"):
+        is_upload = request.headers.get("content-type", "").startswith("multipart/form-data")
+        limit = UPLOAD_BODY_LIMIT if is_upload else settings.max_request_body_bytes
+        declared = request.headers.get("content-length")
+        if declared is None:
+            if request.headers.get("transfer-encoding"):
+                return JSONResponse({"detail": "Content-Length erforderlich"}, status_code=411)
+        elif not declared.isdigit() or int(declared) > limit:
+            return JSONResponse({"detail": "Anfrage ist zu gross"}, status_code=413)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -98,6 +136,14 @@ async def add_security_headers(request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    # Swagger UI/ReDoc laden ihre Skripte von einem CDN und wuerden von der strikten
+    # CSP blockiert; sie verarbeiten keine Nutzerdaten der App.
+    if request.url.path not in DOCS_PATHS:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; img-src 'self' data:; script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; "
+            "base-uri 'self'; form-action 'self'"
+        )
     if settings.app_env == "production":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     return response
@@ -123,5 +169,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 @app.get("/", include_in_schema=False)
+@app.get("/reset-password", include_in_schema=False)
 def serve_frontend():
-    return FileResponse(str(TEMPLATES_DIR / "index.html"))
+    # no-cache: index.html verweist auf unversionierte JS/CSS-Dateien.
+    return FileResponse(str(TEMPLATES_DIR / "index.html"), headers={"Cache-Control": "no-cache"})

@@ -83,6 +83,8 @@ const Api = {
   login: (payload) => apiRequest("POST", "/auth/login", payload, { auth: false }),
   logout: () => apiRequest("POST", "/auth/logout", { refresh_token: TokenStore.getRefresh() }, { auth: false }),
   me: () => apiRequest("GET", "/auth/me"),
+  requestPasswordReset: (email) => apiRequest("POST", "/auth/password/reset-request", { email }, { auth: false }),
+  confirmPasswordReset: (token, newPassword) => apiRequest("POST", "/auth/password/reset-confirm", { token, new_password: newPassword }, { auth: false }),
 
   listLocations: () => apiRequest("GET", "/charging/locations"),
   getLocation: (id) => apiRequest("GET", `/charging/locations/${id}`),
@@ -128,7 +130,10 @@ async function uploadImage(path, file) {
   let data = null;
   try { data = await res.json(); } catch (_) { /* kein JSON-Body */ }
   if (!res.ok) {
-    const detailMsg = data && data.detail ? data.detail : `Fehler ${res.status}`;
+    let detailMsg = data && data.detail ? data.detail : `Fehler ${res.status}`;
+    if (Array.isArray(detailMsg)) {
+      detailMsg = detailMsg.map(e => e.msg || JSON.stringify(e)).join(", ");
+    }
     throw new ApiError(res.status, detailMsg);
   }
   return data;

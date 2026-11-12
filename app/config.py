@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +32,34 @@ class Settings(BaseSettings):
 
     admin_bootstrap_email: str = ""
     admin_bootstrap_password: str = ""
+
+    # Apple Push Notification service (APNs), Token-Authentifizierung mit .p8-Schluessel.
+    # Schluessel entweder als Dateipfad (APNS_AUTH_KEY_PATH) oder direkt als Text mit
+    # "\n" statt Zeilenumbruechen (APNS_AUTH_KEY). Leer = Push deaktiviert.
+    apns_key_id: str = ""
+    apns_team_id: str = ""
+    apns_bundle_id: str = ""
+    apns_auth_key_path: str = ""
+    apns_auth_key: str = ""
+    # true fuer Entwicklungs-Builds (aus Xcode gestartet), false fuer TestFlight/App Store.
+    apns_use_sandbox: bool = False
+
+    max_request_body_bytes: int = 64 * 1024
+    max_cars_per_user: int = 10
+
+    @model_validator(mode="after")
+    def _reject_weak_secrets(self):
+        # Mit einem bekannten Platzhalter als JWT-Schluessel kann jeder gueltige
+        # (auch Admin-)Tokens faelschen. In Produktion deshalb gar nicht erst starten.
+        if self.app_env == "production":
+            for name in ("app_secret_key", "jwt_secret_key"):
+                value = getattr(self, name)
+                if len(value) < 32 or value.upper().startswith("CHANGE_ME"):
+                    raise ValueError(
+                        f"{name.upper()} ist ein Platzhalter oder zu kurz (min. 32 Zeichen). "
+                        "Erzeugen mit: openssl rand -hex 32"
+                    )
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:
